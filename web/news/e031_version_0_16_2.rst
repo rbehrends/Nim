@@ -29,6 +29,13 @@ Changes affecting backwards compatibility
 - ``memfiles.open`` now closes file handleds/fds by default.  Passing
   ``allowRemap=true`` to ``memfiles.open`` recovers the old behavior.  The old
   behavior is only needed to call ``mapMem`` on the resulting ``MemFile``.
+- When the ``requiresInit`` pragma is applied to a record type, future versions
+  of Nim will also require you to initialize all the fields of the type during
+  object construction. For now, only a warning will be produced.
+- The Object construction syntax now performs a number of additional safety
+  checks. When fields within case objects are initialiazed, the compiler will
+  now demand that the respective discriminator field has a matching known
+  compile-time value.
 
 Library Additions
 -----------------
