@@ -92,6 +92,7 @@ proc initDefines*() =
   defineSymbol("nimcomputedgoto")
   defineSymbol("nimunion")
   defineSymbol("nimnewshared")
+  defineSymbol("nimNewTypedesc")
   defineSymbol("nimrequiresnimframe")
   defineSymbol("nimparsebiggestfloatmagic")
   defineSymbol("nimalias")

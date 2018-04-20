@@ -10,6 +10,12 @@
 # this module does the semantic checking of type declarations
 # included from sem.nim
 
+const
+  mStaticTy = {mStatic}
+  mTypeTy = {mType, mTypeOf}
+  # XXX: This should be needed only temporarily until the C
+  # sources are rebuilt
+
 proc newOrPrevType(kind: TTypeKind, prev: PType, c: PContext): PType =
   if prev == nil:
     result = newTypeS(kind, c)
@@ -336,6 +342,7 @@ proc semTypeIdent(c: PContext, n: PNode): PSym =
     if result != nil:
       markUsed(n.info, result, c.graph.usageSym)
       styleCheckUse(n.info, result)
+
       if result.kind == skParam and result.typ.kind == tyTypeDesc:
         # This is a typedesc param. is it already bound?
         # it's not bound when it's used multiple times in the
@@ -361,8 +368,7 @@ proc semTypeIdent(c: PContext, n: PNode): PSym =
         else:
           localError(n.info, errTypeExpected)
           return errorSym(c, n)
-
-      if result.kind != skType:
+      if result.kind != skType and result.magic notin (mStaticTy + mTypeTy):
         # this implements the wanted ``var v: V, x: V`` feature ...
         var ov: TOverloadIter
         var amb = initOverloadIter(ov, c, n)
@@ -832,9 +838,9 @@ proc liftParamType(c: PContext, procKind: TSymKind, genericParams: PNode,
     result = addImplicitGenericImpl(newTypeS(tyGenericParam, c), nil)
 
   of tyStatic:
-    # proc(a: expr{string}, b: expr{nkLambda})
-    # overload on compile time values and AST trees
-    if paramType.n != nil: return # this is a concrete type
+    if paramType.base.kind != tyNone and paramType.n != nil:
+      # this is a concrete type
+      return
     if tfUnresolved in paramType.flags: return # already lifted
     let base = paramType.base.maybeLift
     if base.isMetaType and procKind == skMacro:
@@ -853,7 +859,7 @@ proc liftParamType(c: PContext, procKind: TSymKind, genericParams: PNode,
   of tyDistinct:
     if paramType.sonsLen == 1:
       # disable the bindOnce behavior for the type class
-      result = liftingWalk(paramType.sons[0], true)
+      result = liftingWalk(paramType.base, true)
 
   of tySequence, tySet, tyArray, tyOpenArray,
      tyVar, tyLent, tyPtr, tyRef, tyProc:
@@ -1323,6 +1329,12 @@ proc symFromExpectedTypeNode(c: PContext, n: PNode): PSym =
     localError(n.info, errTypeExpected)
     result = errorSym(c, n)
 
+proc semStaticType(c: PContext, childNode: PNode, prev: PType): PType =
+  result = newOrPrevType(tyStatic, prev, c)
+  var base = semTypeNode(c, childNode, nil).skipTypes({tyTypeDesc, tyAlias})
+  result.rawAddSon(base)
+  result.flags.incl tfHasStatic
+
 proc semTypeNode(c: PContext, n: PNode, prev: PType): PType =
   result = nil
   inc c.inTypeContext
@@ -1428,7 +1440,8 @@ proc semTypeNode(c: PContext, n: PNode, prev: PType): PType =
     of mSeq: result = semContainer(c, n, tySequence, "seq", prev)
     of mOpt: result = semContainer(c, n, tyOpt, "opt", prev)
     of mVarargs: result = semVarargs(c, n, prev)
-    of mTypeDesc: result = makeTypeDesc(c, semTypeNode(c, n[1], nil))
+    of mTypeDesc, mTypeTy: result = makeTypeDesc(c, semTypeNode(c, n[1], nil))
+    of mStaticTy: result = semStaticType(c, n[1], prev)
     of mExpr:
       result = semTypeNode(c, n.sons[0], nil)
       if result != nil:
@@ -1517,11 +1530,7 @@ proc semTypeNode(c: PContext, n: PNode, prev: PType): PType =
   of nkPtrTy: result = semAnyRef(c, n, tyPtr, prev)
   of nkVarTy: result = semVarType(c, n, prev)
   of nkDistinctTy: result = semDistinct(c, n, prev)
-  of nkStaticTy:
-    result = newOrPrevType(tyStatic, prev, c)
-    var base = semTypeNode(c, n.sons[0], nil).skipTypes({tyTypeDesc})
-    result.rawAddSon(base)
-    result.flags.incl tfHasStatic
+  of nkStaticTy: result = semStaticType(c, n[0], prev)
   of nkIteratorTy:
     if n.sonsLen == 0:
       result = newTypeS(tyBuiltInTypeClass, c)
@@ -1617,8 +1626,11 @@ proc processMagicType(c: PContext, m: PSym) =
   of mStmt:
     setMagicType(m, tyStmt, 0)
     if m.name.s == "stmt": m.typ.flags.incl tfOldSchoolExprStmt
-  of mTypeDesc:
+  of mTypeDesc, mType:
     setMagicType(m, tyTypeDesc, 0)
+    rawAddSon(m.typ, newTypeS(tyNone, c))
+  of mStatic:
+    setMagicType(m, tyStatic, 0)
     rawAddSon(m.typ, newTypeS(tyNone, c))
   of mVoidType:
     setMagicType(m, tyVoid, 0)
