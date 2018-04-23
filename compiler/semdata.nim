@@ -282,7 +282,8 @@ proc makeTypeDesc*(c: PContext, typ: PType): PType =
     result.addSonSkipIntLit(typ.assertNotNil)
 
 proc makeTypeSymNode*(c: PContext, typ: PType, info: TLineInfo): PNode =
-  let typedesc = makeTypeDesc(c, typ)
+  let typedesc = newTypeS(tyTypeDesc, c)
+  typedesc.addSonSkipIntLit(typ.assertNotNil)
   let sym = newSym(skType, c.cache.idAnon, getCurrOwner(c), info).linkTo(typedesc)
   return newSymNode(sym, info)
 
